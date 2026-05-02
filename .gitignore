@@ -1,0 +1,38 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android
+local.properties
+*.iml
+.idea/
+.DS_Store
+captures/
+
+# NDK / CMake
+.externalNativeBuild/
+.cxx/
+
+# Signing (never commit real keys)
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Kotlin
+*.class
+*.log
+.kotlin/
+
+# Profiling / heap dumps
+*.hprof
+
+# Built artifacts (if generated outside build/)
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# OS
+Thumbs.db
