@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sample Snatcher</string>
+    <string name="home_title">Sample Snatcher</string>
+    <string name="start_buffering">Start buffering</string>
+    <string name="stop_buffering">Stop buffering</string>
+    <string name="open_editor">Open editor</string>
+    <string name="cd_settings">Settings</string>
+    <string name="onboarding_mix_title">What gets recorded</string>
+    <string name="onboarding_mix_body">This app captures the device playback mix when Android allows it. DRM or apps that disable capture may be silent in the buffer even if you hear them. Bluetooth vs speaker does not change that.\n\nAndroid will show a system dialog that mentions screen or casting. That is the only way the OS allows access to internal playback audio—this app does not record your screen to a video file and does not send it anywhere; it only decodes audio for the rolling buffer on your device.</string>
+    <string name="projection_system_dialog_title">About the next system prompt</string>
+    <string name="projection_system_dialog_body">Google only provides one permission for “internal” audio: the same MediaProjection token used for screen recording. The system’s wording will talk about screen or casting — that is not something we can change.\n\nSample Snatcher uses that token only with AudioRecord playback capture. We do not create a screen video, do not stream your display, and do not upload audio.\n\nIf you are not comfortable with that system dialog, you will not be able to use playback capture on stock Android; the alternative would be recording from the microphone (not implemented here).</string>
+    <string name="continue_button">Continue</string>
+    <string name="cancel">Cancel</string>
+    <string name="perm_audio_rationale">Microphone permission is required for playback capture.</string>
+    <string name="perm_notifications_rationale">Notifications keep buffering running in the background.</string>
+    <string name="settings_title">Buffer length</string>
+    <string name="settings_buffer_hint">Applies the next time you start buffering (60–90 seconds).</string>
+    <string name="editor_title">Editor</string>
+    <string name="selection_start">Selection start</string>
+    <string name="selection_end">Selection end</string>
+    <string name="waveform_zoom_hint">Waveform: pinch to zoom in, drag to pan along the buffer when zoomed. Selection sliders always use the full buffer.</string>
+    <string name="waveform_zoom_hint_short">Pinch to zoom · drag to pan · orange line shows preview position</string>
+    <string name="snap_zero">Snap zero-cross</string>
+    <string name="snap_transient">Snap transients</string>
+    <string name="loop_preview">Loop preview</string>
+    <string name="preview_selection">Preview</string>
+    <string name="stop_preview">Stop</string>
+    <string name="preview_empty">Nothing to preview in that selection.</string>
+    <string name="export_label_hint">Base file name</string>
+    <string name="export_label_body">Export opens Android’s save screen with a suggested name (your base name plus date and BPM when applicable). Pick folder or rename there.</string>
+    <string name="export_loop_toggle">Treat selection as loop (BPM)</string>
+    <string name="tap_tempo">Tap tempo</string>
+    <string name="export_wav">Export WAV…</string>
+    <string name="exported_uri">Saved: %1$s</string>
+    <string name="export_failed">Could not save file.</string>
+    <string name="capture_notification_channel">Audio capture</string>
+    <string name="capture_notification_title">Buffering device audio</string>
+    <string name="capture_notification_text">Tap to open Sample Snatcher</string>
+    <string name="capture_notification_action_stop">Stop</string>
+</resources>
