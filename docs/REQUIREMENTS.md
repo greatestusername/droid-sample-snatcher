@@ -1,6 +1,6 @@
 ---
 title: Sample Snatcher — Product requirements
-version: 1.3.12
+version: 1.3.16
 last_updated: 2026-05-02
 source_plan: android_sample_snatcher_71757450.plan.md
 ---
@@ -57,6 +57,7 @@ Continuously buffer recent audio from the device **master playback output mix** 
 
 - **Intent**: **Master playback mix**, not per-app isolation (v1).
 - **Android**: **AudioPlaybackCapture** exposes the **system playback mix** per policy; **DRM / non-capturable** sources may be **absent** from the buffer while still audible.
+- **Android TV / third-party YouTube clients** (e.g. [SmartTube](https://github.com/yuliskov/SmartTube)): the app may declare `allowAudioPlaybackCapture` yet still be missing from the capture mix if playback uses **tunneled video** (hardware path) or **HDMI / SPDIF bitstream** (compressed passthrough) instead of **PCM** into the mixer. That is a **player/device path** limitation, not fixed by sideloading Sample Snatcher; users can try **disabling tunneled playback** in the player’s tweak settings and preferring **PCM / stereo** output so audio enters the normal mix—**no APK patch** to the other app is required, only settings.
 - **MediaProjection** (or equivalent) may be required; consent can be revoked.
 - **Bluetooth / output routing**: BT receives the **same routed mix** as speakers; capture does not read “from Bluetooth.” Routing to BT **does not** bypass capture restrictions.
 
@@ -72,13 +73,17 @@ Generic static settings-only screens may use Material defaults without the full 
 
 ## Technical notes (summary)
 
-- **Capture**: `AudioRecord` + `AudioPlaybackCaptureConfiguration`; foreground service types per target SDK.
+- **Capture**: `AudioRecord` + `AudioPlaybackCaptureConfiguration`; sample rate follows `AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE` (mix alignment); foreground service types per target SDK.
 - **Editor**: preview via `AudioTrack` (stream); playhead position for UI = **wall clock vs selection duration** (not `getPlaybackHeadPosition` for stream preview).
 - **Snapping**: zero-cross search ±N samples; transient via envelope/spectral flux peaks.
 - **BPM**: autocorrelation / lightweight estimator; run on export or explicit action.
 
 ## Changelog
 
+- **1.3.16** (2026-05-02): **Capture reliability (Samsung / One UI)** — `AudioPlaybackCaptureConfiguration` matchers reduced to **MEDIA + GAME + UNKNOWN** (extra usages caused `UnsupportedOperationException: could not register audio policy` on some devices). **Defer** `AudioRecord` `build()` by **200 ms** on the main looper after `getMediaProjection` to avoid audio-policy race after the system consent dialog. **Catch** `UnsupportedOperationException` / `SecurityException` during `build()` with user-visible `lastError` and clean teardown. **`START_NOT_STICKY`** for the capture service so the OS does not **restart** with a **stale** projection intent (which produced `SecurityException` on `startForeground` in a new process).
+- **1.3.15** (2026-05-02): **Revert** — removed capture **diagnostics** (`CaptureUiState` telemetry, Settings card, log spam); restore simple capture loop only (fixes post-permission instability reported after 1.3.14).
+- **1.3.14** (2026-05-02): **Capture diagnostics** — non-obtrusive telemetry on `CaptureUiState` (`lastPeakDb`, `lastReadBytes`, `totalBytes`, `zeroBufferStreak`, `sampleRateHz`); throttled to ~5 Hz from the capture thread; `Log.i("SnatcherCapture", …)`. **Settings** screen shows a small **Capture diagnostics** block (sample rate, last peak, zero-buffer streak, total KB) — Home screen unchanged. Helps diagnose silent capture (e.g. SmartTube on Android TV) without changing user-facing flow. **Superseded by 1.3.15** (reverted in tree).
+- **1.3.13** (2026-05-02): **Capture** — ring buffer + `AudioRecord` use **device mixer sample rate** (`PROPERTY_OUTPUT_SAMPLE_RATE`); widen **usage** matchers (`VOICE_COMMUNICATION`, `ASSISTANT`, `VIRTUAL_SOURCE` on Q+). **Docs / onboarding** — Android TV players (e.g. SmartTube): tunneled playback / bitstream vs PCM mix; settings-only workaround.
 - **1.3.12** (2026-05-02): **Playhead** — **time-based** (`PreviewPlayheadMath`: elapsed / duration, loop wraps with `mod`); UI **`LaunchedEffect` + `tickPlayhead` ~60 Hz**; **unit tests** `PreviewPlayheadMathTest`. **Preview** + **Stop** split again; **Stop** sets **`_isPlaying` synchronously** (no `Handler` post) so playback stops immediately. **Stop** no longer `enabled`-gated.
 - **1.3.11** (2026-05-02): **Preview** — **one-shot** waits after the last **`write`** until **`playbackHeadPosition`** reaches end (was releasing **AudioTrack** immediately → silence). **Playhead** uses **`playbackHeadPosition`** (loop: `head % fc`) + **Main `Handler`** posts for Compose. **Loop preview** default **on**.
 - **1.3.10** (2026-05-02): **Preview** — **playhead** driven by **`playheadFraction` `StateFlow`** (writer thread updates; fixes static line). **Stop** calls **`AudioTrack.pause()` + `flush()`** so blocked **`write()`** returns; worker still **release**s in `finally`. Removed clearing playhead data before the worker joined.

@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
@@ -15,7 +17,9 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import com.samplesnatcher.MainActivity
 import com.samplesnatcher.R
@@ -35,15 +39,25 @@ class CaptureAudioService : Service() {
     private val capturePaused = AtomicBoolean(false)
     private var captureThread: Thread? = null
     private val stopInProgress = AtomicBoolean(false)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingCaptureSetup: Runnable? = null
 
     private lateinit var ring: PcmRingBuffer
 
+    /** Matches the device playback mix rate (often 48 kHz; many TVs use 44.1 kHz). */
+    private fun mixerOutputSampleRateHz(): Int {
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val raw = am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE) ?: return 48_000
+        return raw.toIntOrNull()?.takeIf { it in 8_000..192_000 } ?: 48_000
+    }
+
     private fun newRingBuffer(): PcmRingBuffer {
         val seconds = AppBufferConfig.readBufferSeconds(this)
+        val hz = mixerOutputSampleRateHz()
         return PcmRingBuffer(
-            capacityFrames = 48_000 * seconds,
+            capacityFrames = hz * seconds,
             channelCount = 2,
-        ).also { it.setSampleRate(48_000) }
+        ).also { it.setSampleRate(hz) }
     }
 
     private val _state = MutableStateFlow(CaptureUiState())
@@ -96,7 +110,9 @@ class CaptureAudioService : Service() {
                 }
             }
         }
-        return START_STICKY
+        // Do not auto-restart with a stale MediaProjection intent after a crash — that triggers
+        // SecurityException on startForeground (grant is one-shot per process) on some OEMs (e.g. Samsung).
+        return START_NOT_STICKY
     }
 
     private fun startCapturePipeline(resultCode: Int, resultData: Intent) {
@@ -122,13 +138,15 @@ class CaptureAudioService : Service() {
         mp.registerCallback(projectionCallback, null)
         val projection = mp
 
+        // Keep matchers minimal: some devices (notably Samsung) fail AudioPolicy registration
+        // ("could not register audio policy") when too many usages are listed.
         val config = AudioPlaybackCaptureConfiguration.Builder(projection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
             .build()
 
-        val sampleRate = 48_000
+        val sampleRate = mixerOutputSampleRateHz()
         val channelConfig = AudioFormat.CHANNEL_IN_STEREO
         val encoding = AudioFormat.ENCODING_PCM_16BIT
         val minBuf =
@@ -147,52 +165,75 @@ class CaptureAudioService : Service() {
             .setChannelMask(channelConfig)
             .build()
 
-        val record = AudioRecord.Builder()
-            .setAudioFormat(format)
-            .setBufferSizeInBytes(minBuf * 2)
-            .setAudioPlaybackCaptureConfig(config)
-            .build()
+        pendingCaptureSetup?.let { mainHandler.removeCallbacks(it) }
+        val setup = Runnable {
+            pendingCaptureSetup = null
+            if (stopInProgress.get() || mediaProjection !== projection) return@Runnable
+            val record = try {
+                AudioRecord.Builder()
+                    .setAudioFormat(format)
+                    .setBufferSizeInBytes(minBuf * 2)
+                    .setAudioPlaybackCaptureConfig(config)
+                    .build()
+            } catch (e: UnsupportedOperationException) {
+                _state.value = _state.value.copy(
+                    lastError = "Playback capture not available (${e.message ?: "audio policy"})",
+                )
+                releaseProjection()
+                stopForegroundCompat()
+                stopSelf()
+                return@Runnable
+            } catch (e: SecurityException) {
+                _state.value = _state.value.copy(lastError = "Playback capture denied (${e.message})")
+                releaseProjection()
+                stopForegroundCompat()
+                stopSelf()
+                return@Runnable
+            }
 
-        if (record.state != AudioRecord.STATE_INITIALIZED) {
-            record.release()
-            _state.value = _state.value.copy(lastError = "AudioRecord init failed (playback capture unavailable?)")
-            releaseProjection()
-            stopForegroundCompat()
-            stopSelf()
-            return
-        }
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
+                record.release()
+                _state.value = _state.value.copy(lastError = "AudioRecord init failed (playback capture unavailable?)")
+                releaseProjection()
+                stopForegroundCompat()
+                stopSelf()
+                return@Runnable
+            }
 
-        ring.setSampleRate(sampleRate)
-        audioRecord = record
-        captureRunning.set(true)
+            ring.setSampleRate(sampleRate)
+            audioRecord = record
+            captureRunning.set(true)
 
-        captureThread = Thread(
-            {
-                val bytes = ByteArray(minBuf)
-                val ar = audioRecord
-                if (ar != null) {
-                    ar.startRecording()
-                    while (captureRunning.get()) {
-                        val n = ar.read(bytes, 0, bytes.size)
-                        if (n > 0) {
-                            if (!capturePaused.get()) {
-                                ring.writeFromByteArrayInterleavedS16Le(bytes, n)
+            captureThread = Thread(
+                {
+                    val bytes = ByteArray(minBuf)
+                    val ar = audioRecord
+                    if (ar != null) {
+                        ar.startRecording()
+                        while (captureRunning.get()) {
+                            val n = ar.read(bytes, 0, bytes.size)
+                            if (n > 0) {
+                                if (!capturePaused.get()) {
+                                    ring.writeFromByteArrayInterleavedS16Le(bytes, n)
+                                }
+                            } else if (n < 0) {
+                                _state.value = _state.value.copy(lastError = "read error $n")
+                                break
                             }
-                        } else if (n < 0) {
-                            _state.value = _state.value.copy(lastError = "read error $n")
-                            break
+                        }
+                        try {
+                            ar.stop()
+                        } catch (_: Exception) {
                         }
                     }
-                    try {
-                        ar.stop()
-                    } catch (_: Exception) {
-                    }
-                }
-            },
-            "sample-snatcher-capture",
-        ).also { it.start() }
+                },
+                "sample-snatcher-capture",
+            ).also { it.start() }
 
-        _state.value = CaptureUiState(isRunning = true, lastError = null)
+            _state.value = CaptureUiState(isRunning = true, lastError = null)
+        }
+        pendingCaptureSetup = setup
+        mainHandler.postDelayed(setup, AUDIO_POLICY_SETUP_DELAY_MS)
     }
 
     /**
@@ -202,6 +243,8 @@ class CaptureAudioService : Service() {
     private fun stopCaptureInternal(releaseForegroundNotification: Boolean = true) {
         if (!stopInProgress.compareAndSet(false, true)) return
         try {
+            pendingCaptureSetup?.let { mainHandler.removeCallbacks(it) }
+            pendingCaptureSetup = null
             captureRunning.set(false)
             capturePaused.set(false)
             try {
@@ -296,6 +339,8 @@ class CaptureAudioService : Service() {
         const val EXTRA_RESULT_DATA = "extra_result_data"
         private const val CHANNEL_ID = "sample_snatcher_capture"
         private const val NOTIFICATION_ID = 1001
+        /** Brief delay after MediaProjection grant so AudioPolicy can register (avoids OEM race). */
+        private const val AUDIO_POLICY_SETUP_DELAY_MS = 200L
     }
 }
 
