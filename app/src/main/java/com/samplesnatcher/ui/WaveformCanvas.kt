@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,7 @@ fun WaveformCanvas(
     playheadNormalized: Float? = null,
     modifier: Modifier = Modifier,
     zoomHintDescription: String = "",
+    onViewportChanged: ((start: Float, end: Float) -> Unit)? = null,
 ) {
     var viewStart by remember { mutableFloatStateOf(0f) }
     var viewFrac by remember { mutableFloatStateOf(1f) }
@@ -49,6 +51,12 @@ fun WaveformCanvas(
         Modifier.semantics { contentDescription = zoomHintDescription }
     } else {
         Modifier
+    }
+
+    val clampedStart = viewStart.coerceIn(0f, (1f - viewFrac).coerceAtLeast(0f))
+    val clampedFrac = viewFrac.coerceIn(minFrac, 1f)
+    SideEffect {
+        onViewportChanged?.invoke(clampedStart, (clampedStart + clampedFrac).coerceIn(0f, 1f))
     }
 
     BoxWithConstraints(

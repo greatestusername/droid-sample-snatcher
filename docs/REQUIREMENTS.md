@@ -1,6 +1,6 @@
 ---
 title: Sample Snatcher — Product requirements
-version: 1.3.16
+version: 1.3.19
 last_updated: 2026-05-02
 source_plan: android_sample_snatcher_71757450.plan.md
 ---
@@ -27,7 +27,7 @@ Continuously buffer recent audio from the device **master playback output mix** 
 
 ### 2. Save / editor view
 
-- **Waveform** of full buffer (downsampled peaks); **pinch-zoom** and **pan** on the waveform strip for inspection (**display only** — selection remains normalized to the **full** buffer; sliders do not change meaning).
+- **Waveform** of full buffer (downsampled peaks); **pinch-zoom** and **pan** on the waveform strip for inspection. Selection remains normalized to the full buffer, and an editor action can map the **current zoom viewport** to selection start/end for finer slider resolution.
 - **Selection**: draggable handles or brush; show duration; sample-accurate edges where feasible.
 - **Snapping** (toolbar toggles): **zero-crossing**; **transient** (onset/energy peaks); optional advanced tuning.
 - **Preview**: separate **Preview** and **Stop** buttons; optional **Loop preview** switch (**on** by default). Live **playhead** uses **wall-clock elapsed vs clip duration** ([PreviewPlayheadMath], independent of `AudioTrack.getPlaybackHeadPosition`); **compose coroutine** calls `tickPlayhead` ~60 Hz while playing.
@@ -80,6 +80,9 @@ Generic static settings-only screens may use Material defaults without the full 
 
 ## Changelog
 
+- **1.3.19** (2026-05-02): **Editor crash fix** — preview `AudioTrack` init no longer crashes process when the platform rejects track creation (`UnsupportedOperationException: Cannot create AudioTrack`). `PreviewPlayer.play()` now returns success/failure, validates `STATE_INITIALIZED`, uses bounded stream buffer sizing (instead of sizing against full clip), and caller shows a toast on failure.
+- **1.3.18** (2026-05-02): **Editor fader precision** — selection sliders now support a local **slider control range**. **Use zoom for selection** sets both selection and slider range to the current viewport, so faders use the zoomed area (higher effective resolution). Added **Reset slider range** to return faders to full-buffer control.
+- **1.3.17** (2026-05-02): **Editor** — add **Use zoom for selection** action under waveform: maps current zoom viewport to selection start/end, then applies snapping; improves precision when trimming inside a zoomed-in region.
 - **1.3.16** (2026-05-02): **Capture reliability (Samsung / One UI)** — `AudioPlaybackCaptureConfiguration` matchers reduced to **MEDIA + GAME + UNKNOWN** (extra usages caused `UnsupportedOperationException: could not register audio policy` on some devices). **Defer** `AudioRecord` `build()` by **200 ms** on the main looper after `getMediaProjection` to avoid audio-policy race after the system consent dialog. **Catch** `UnsupportedOperationException` / `SecurityException` during `build()` with user-visible `lastError` and clean teardown. **`START_NOT_STICKY`** for the capture service so the OS does not **restart** with a **stale** projection intent (which produced `SecurityException` on `startForeground` in a new process).
 - **1.3.15** (2026-05-02): **Revert** — removed capture **diagnostics** (`CaptureUiState` telemetry, Settings card, log spam); restore simple capture loop only (fixes post-permission instability reported after 1.3.14).
 - **1.3.14** (2026-05-02): **Capture diagnostics** — non-obtrusive telemetry on `CaptureUiState` (`lastPeakDb`, `lastReadBytes`, `totalBytes`, `zeroBufferStreak`, `sampleRateHz`); throttled to ~5 Hz from the capture thread; `Log.i("SnatcherCapture", …)`. **Settings** screen shows a small **Capture diagnostics** block (sample rate, last peak, zero-buffer streak, total KB) — Home screen unchanged. Helps diagnose silent capture (e.g. SmartTube on Android TV) without changing user-facing flow. **Superseded by 1.3.15** (reverted in tree).

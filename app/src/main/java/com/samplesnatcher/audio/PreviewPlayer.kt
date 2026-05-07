@@ -55,11 +55,14 @@ class PreviewPlayer(
         )
     }
 
-    fun play(interleaved: ShortArray, loop: Boolean) {
+    /**
+     * @return true when playback started, false when track initialization failed.
+     */
+    fun play(interleaved: ShortArray, loop: Boolean): Boolean {
         stop()
-        if (interleaved.isEmpty()) return
+        if (interleaved.isEmpty()) return false
         val fc = interleaved.size / channelCount
-        if (fc <= 0) return
+        if (fc <= 0) return false
 
         val outCh = if (channelCount == 1) {
             AudioFormat.CHANNEL_OUT_MONO
@@ -70,24 +73,40 @@ class PreviewPlayer(
             sampleRate,
             outCh,
             AudioFormat.ENCODING_PCM_16BIT,
-        ).coerceAtLeast(interleaved.size * 2)
-        val at = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(outCh)
-                    .build(),
-            )
-            .setBufferSizeInBytes(minBuf * 2)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
+        )
+        if (minBuf <= 0) return false
+        val quarterSecondBytes = (sampleRate * channelCount * 2 / 4).coerceAtLeast(minBuf)
+        val targetBufferBytes = max(minBuf * 2, quarterSecondBytes).coerceAtMost(1_048_576)
+        val at = try {
+            AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build(),
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(outCh)
+                        .build(),
+                )
+                .setBufferSizeInBytes(targetBufferBytes)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+        } catch (_: UnsupportedOperationException) {
+            return false
+        } catch (_: IllegalArgumentException) {
+            return false
+        }
+        if (at.state != AudioTrack.STATE_INITIALIZED) {
+            try {
+                at.release()
+            } catch (_: Exception) {
+            }
+            return false
+        }
         track = at
         clipFrameCount = fc
         clipLoop = loop
@@ -138,6 +157,7 @@ class PreviewPlayer(
                 _playheadFraction.value = 0f
             }
         }, "preview-audio").also { it.start() }
+        return true
     }
 
     fun stop() {

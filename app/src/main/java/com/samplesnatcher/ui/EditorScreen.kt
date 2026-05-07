@@ -19,6 +19,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -68,6 +69,10 @@ fun EditorScreen(
     var peaks by remember { mutableStateOf(FloatArray(0)) }
     var selStart by remember { mutableFloatStateOf(0.05f) }
     var selEnd by remember { mutableFloatStateOf(0.95f) }
+    var viewportStart by remember { mutableFloatStateOf(0f) }
+    var viewportEnd by remember { mutableFloatStateOf(1f) }
+    var sliderRangeStart by remember { mutableFloatStateOf(0f) }
+    var sliderRangeEnd by remember { mutableFloatStateOf(1f) }
     var zeroSnap by remember { mutableStateOf(true) }
     var transientSnap by remember { mutableStateOf(false) }
     var loopExport by remember { mutableStateOf(true) }
@@ -143,6 +148,8 @@ fun EditorScreen(
         onDispose { preview.stop() }
     }
 
+    fun safe01(v: Float): Float = if (v.isFinite()) v.coerceIn(0f, 1f) else 0f
+
     fun framesFromSelection(): Pair<Long, Long> {
         val w = ring.getFrameWindow()
         val oldest = w.oldest
@@ -151,8 +158,8 @@ fun EditorScreen(
         val maxIndex = newest - 1
         val avail = w.available
         if (avail <= 1L) return oldest to oldest
-        val lo = min(selStart, selEnd)
-        val hi = max(selStart, selEnd)
+        val lo = min(safe01(selStart), safe01(selEnd))
+        val hi = max(safe01(selStart), safe01(selEnd))
         var s = (oldest + (lo * (avail - 1).toFloat()).toLong())
         var e = (oldest + (hi * (avail - 1).toFloat()).toLong())
         s = s.coerceAtLeast(oldest).coerceAtMost(maxIndex)
@@ -168,24 +175,41 @@ fun EditorScreen(
     }
 
     fun applySnapping() {
-        var (s, e) = framesFromSelection()
-        // Onsets first so zero-cross doesn’t pull edges away from transients; omit zero step if off.
-        if (transientSnap) {
-            s = SampleSnapping.snapTransient(ring, ring.channelCount, s)
-            e = SampleSnapping.snapTransient(ring, ring.channelCount, e)
+        try {
+            var (s, e) = framesFromSelection()
+            // Onsets first so zero-cross doesn’t pull edges away from transients; omit zero step if off.
+            if (transientSnap) {
+                s = SampleSnapping.snapTransient(ring, ring.channelCount, s)
+                e = SampleSnapping.snapTransient(ring, ring.channelCount, e)
+            }
+            if (zeroSnap) {
+                s = SampleSnapping.snapZeroCrossing(ring, ring.channelCount, s)
+                e = SampleSnapping.snapZeroCrossing(ring, ring.channelCount, e)
+            }
+            if (e <= s) return
+            val w = ring.getFrameWindow()
+            val avail = w.available
+            if (avail <= 1) return
+            val oldest = w.oldest
+            val denom = (avail - 1).coerceAtLeast(1)
+            selStart = safe01((s - oldest).toFloat() / denom)
+            selEnd = safe01((e - oldest).toFloat() / denom)
+        } catch (_: Throwable) {
+            // Keep editor alive if snapping races with live buffer updates.
         }
-        if (zeroSnap) {
-            s = SampleSnapping.snapZeroCrossing(ring, ring.channelCount, s)
-            e = SampleSnapping.snapZeroCrossing(ring, ring.channelCount, e)
-        }
-        if (e <= s) return
-        val w = ring.getFrameWindow()
-        val avail = w.available
-        if (avail <= 1) return
-        val oldest = w.oldest
-        val denom = (avail - 1).coerceAtLeast(1)
-        selStart = ((s - oldest).toFloat() / denom).coerceIn(0f, 1f)
-        selEnd = ((e - oldest).toFloat() / denom).coerceIn(0f, 1f)
+    }
+
+    fun sliderGlobalToLocal(global: Float): Float {
+        val lo = min(sliderRangeStart, sliderRangeEnd).coerceIn(0f, 1f)
+        val hi = max(sliderRangeStart, sliderRangeEnd).coerceIn(0f, 1f)
+        val span = (hi - lo).coerceAtLeast(1e-6f)
+        return safe01((global - lo) / span)
+    }
+
+    fun sliderLocalToGlobal(local: Float): Float {
+        val lo = min(sliderRangeStart, sliderRangeEnd).coerceIn(0f, 1f)
+        val hi = max(sliderRangeStart, sliderRangeEnd).coerceIn(0f, 1f)
+        return (lo + (hi - lo) * local.coerceIn(0f, 1f)).coerceIn(0f, 1f)
     }
 
     Scaffold(
@@ -209,8 +233,8 @@ fun EditorScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val selLo = min(selStart, selEnd)
-            val selHi = max(selStart, selEnd)
+            val selLo = min(safe01(selStart), safe01(selEnd))
+            val selHi = max(safe01(selStart), safe01(selEnd))
             val playheadNorm =
                 if (previewPlaying) selLo + (selHi - selLo) * playheadSelFrac else null
             WaveformCanvas(
@@ -220,23 +244,59 @@ fun EditorScreen(
                 playheadNormalized = playheadNorm,
                 modifier = Modifier.fillMaxWidth(),
                 zoomHintDescription = stringResource(R.string.waveform_zoom_hint),
+                onViewportChanged = { start, end ->
+                    viewportStart = start
+                    viewportEnd = end
+                },
             )
-            Text(
-                text = stringResource(R.string.waveform_zoom_hint_short),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.waveform_zoom_hint_short),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    onClick = {
+                        val vLo = min(viewportStart, viewportEnd).coerceIn(0f, 1f)
+                        val vHi = max(viewportStart, viewportEnd).coerceIn(0f, 1f)
+                        sliderRangeStart = vLo
+                        sliderRangeEnd = vHi
+                        selStart = vLo
+                        selEnd = vHi
+                        applySnapping()
+                    },
+                ) {
+                    Text(stringResource(R.string.use_zoom_for_selection))
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        sliderRangeStart = 0f
+                        sliderRangeEnd = 1f
+                    },
+                ) {
+                    Text(stringResource(R.string.reset_slider_range))
+                }
+            }
             Text(stringResource(R.string.selection_start), style = MaterialTheme.typography.labelLarge)
             Slider(
-                value = selStart,
-                onValueChange = { selStart = it },
+                value = sliderGlobalToLocal(safe01(selStart)),
+                onValueChange = { selStart = safe01(sliderLocalToGlobal(it)) },
                 onValueChangeFinished = { applySnapping() },
                 valueRange = 0f..1f,
             )
             Text(stringResource(R.string.selection_end), style = MaterialTheme.typography.labelLarge)
             Slider(
-                value = selEnd,
-                onValueChange = { selEnd = it },
+                value = sliderGlobalToLocal(safe01(selEnd)),
+                onValueChange = { selEnd = safe01(sliderLocalToGlobal(it)) },
                 onValueChangeFinished = { applySnapping() },
                 valueRange = 0f..1f,
             )
@@ -260,7 +320,10 @@ fun EditorScreen(
                         if (pcm.isEmpty()) {
                             Toast.makeText(context, R.string.preview_empty, Toast.LENGTH_SHORT).show()
                         } else {
-                            preview.play(pcm, loop = previewLoop)
+                            val ok = preview.play(pcm, loop = previewLoop)
+                            if (!ok) {
+                                Toast.makeText(context, R.string.preview_init_failed, Toast.LENGTH_SHORT).show()
+                            }
                         }
                     },
                     modifier = Modifier.weight(1f),
