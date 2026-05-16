@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.samplesnatcher.R
 import com.samplesnatcher.audio.BpmEstimator
+import com.samplesnatcher.audio.PcmNormalize
 import com.samplesnatcher.audio.PcmRingBuffer
 import com.samplesnatcher.audio.PreviewPlayer
 import com.samplesnatcher.audio.SampleSnapping
@@ -306,6 +307,47 @@ fun EditorScreen(
                 Text(stringResource(R.string.snap_transient))
                 Switch(checked = transientSnap, onCheckedChange = { transientSnap = it })
             }
+            OutlinedButton(
+                onClick = {
+                    preview.stop()
+                    val (s, e) = framesFromSelection()
+                    scope.launch(Dispatchers.Default) {
+                        val pcm = ring.copyRangeInterleaved(s, e)
+                        when (PcmNormalize.peakNormalizeInPlace(pcm)) {
+                            PcmNormalize.Result.EMPTY -> withContext(Dispatchers.Main) {
+                                Toast.makeText(context, R.string.preview_empty, Toast.LENGTH_SHORT).show()
+                            }
+                            PcmNormalize.Result.SILENT -> withContext(Dispatchers.Main) {
+                                Toast.makeText(context, R.string.normalize_selection_silent, Toast.LENGTH_SHORT)
+                                    .show()
+                            }
+                            PcmNormalize.Result.APPLIED -> {
+                                if (!ring.replaceRangeInterleaved(s, e, pcm)) {
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(
+                                            context,
+                                            R.string.normalize_selection_failed,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                } else {
+                                    peaks = ring.computePeakEnvelope(480)
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(
+                                            context,
+                                            R.string.normalize_selection_ok,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.normalize_selection))
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -336,6 +378,23 @@ fun EditorScreen(
                 ) {
                     Text(stringResource(R.string.stop_preview))
                 }
+            }
+            OutlinedButton(
+                onClick = {
+                    val (s, e) = framesFromSelection()
+                    val pcm = ring.copyRangeInterleaved(s, e)
+                    if (pcm.isEmpty()) {
+                        Toast.makeText(context, R.string.preview_empty, Toast.LENGTH_SHORT).show()
+                    } else {
+                        val ok = preview.play(pcm, loop = true, startFrameFraction = 0.75f)
+                        if (!ok) {
+                            Toast.makeText(context, R.string.preview_init_failed, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.preview_loop_from_three_quarter))
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.export_loop_toggle))

@@ -43,22 +43,31 @@ class PreviewPlayer(
     @Volatile
     private var clipLoop: Boolean = false
 
+    @Volatile
+    private var clipStartFraction: Float = 0f
+
     /** Update playhead from wall clock; safe to call every frame from the main thread. */
     fun tickPlayhead() {
         if (!_isPlaying.value || clipFrameCount <= 0) return
         val elapsed = SystemClock.uptimeMillis() - playStartUptimeMs
-        _playheadFraction.value = PreviewPlayheadMath.fraction(
+        _playheadFraction.value = PreviewPlayheadMath.fractionWithStartOffset(
             elapsed,
             clipFrameCount,
             sampleRate,
             clipLoop,
+            clipStartFraction,
         )
     }
 
     /**
+     * @param startFrameFraction 0 = from clip start; 0.75 = from ¾ through end then wrap when looping.
      * @return true when playback started, false when track initialization failed.
      */
-    fun play(interleaved: ShortArray, loop: Boolean): Boolean {
+    fun play(
+        interleaved: ShortArray,
+        loop: Boolean,
+        startFrameFraction: Float = 0f,
+    ): Boolean {
         stop()
         if (interleaved.isEmpty()) return false
         val fc = interleaved.size / channelCount
@@ -107,10 +116,15 @@ class PreviewPlayer(
             }
             return false
         }
+        val startFrac = startFrameFraction.coerceIn(0f, 1f)
+        val startFrame = (fc * startFrac).toInt().coerceIn(0, fc - 1)
+        val startSample = startFrame * channelCount
+
         track = at
         clipFrameCount = fc
         clipLoop = loop
-        _playheadFraction.value = 0f
+        clipStartFraction = startFrac
+        _playheadFraction.value = startFrac
         playing.set(true)
         _isPlaying.value = true
         at.play()
@@ -118,18 +132,21 @@ class PreviewPlayer(
         worker = Thread({
             val t = at
             try {
-                while (playing.get() && !Thread.currentThread().isInterrupted) {
-                    var offset = 0
+                var writeFrom = startSample
+                do {
+                    var offset = writeFrom
                     while (offset < interleaved.size && playing.get()) {
                         val w = t.write(interleaved, offset, interleaved.size - offset)
                         if (w < 0) break
                         offset += w
                     }
                     if (!playing.get()) break
+                    writeFrom = 0
 
                     if (!loop) {
+                        val tailFrames = fc - startFrame
                         val msPadding = 400L
-                        val estMs = max(1L, fc * 1000L / sampleRate + msPadding)
+                        val estMs = max(1L, tailFrames * 1000L / sampleRate + msPadding)
                         val deadline = SystemClock.uptimeMillis() + estMs
                         while (playing.get() && SystemClock.uptimeMillis() < deadline) {
                             val h = try {
@@ -142,7 +159,7 @@ class PreviewPlayer(
                         }
                         break
                     }
-                }
+                } while (playing.get() && !Thread.currentThread().isInterrupted)
             } finally {
                 try {
                     t.pause()
@@ -153,6 +170,7 @@ class PreviewPlayer(
                 }
                 playing.set(false)
                 clipFrameCount = 0
+                clipStartFraction = 0f
                 _isPlaying.value = false
                 _playheadFraction.value = 0f
             }
@@ -163,6 +181,7 @@ class PreviewPlayer(
     fun stop() {
         playing.set(false)
         clipFrameCount = 0
+        clipStartFraction = 0f
         _isPlaying.value = false
         _playheadFraction.value = 0f
         track?.let { t ->

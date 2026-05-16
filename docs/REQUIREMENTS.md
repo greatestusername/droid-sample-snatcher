@@ -1,7 +1,7 @@
 ---
 title: Sample Snatcher — Product requirements
-version: 1.3.19
-last_updated: 2026-05-02
+version: 1.3.21
+last_updated: 2026-05-16
 source_plan: android_sample_snatcher_71757450.plan.md
 ---
 
@@ -30,7 +30,8 @@ Continuously buffer recent audio from the device **master playback output mix** 
 - **Waveform** of full buffer (downsampled peaks); **pinch-zoom** and **pan** on the waveform strip for inspection. Selection remains normalized to the full buffer, and an editor action can map the **current zoom viewport** to selection start/end for finer slider resolution.
 - **Selection**: draggable handles or brush; show duration; sample-accurate edges where feasible.
 - **Snapping** (toolbar toggles): **zero-crossing**; **transient** (onset/energy peaks); optional advanced tuning.
-- **Preview**: separate **Preview** and **Stop** buttons; optional **Loop preview** switch (**on** by default). Live **playhead** uses **wall-clock elapsed vs clip duration** ([PreviewPlayheadMath], independent of `AudioTrack.getPlaybackHeadPosition`); **compose coroutine** calls `tickPlayhead` ~60 Hz while playing.
+- **Normalize selection**: peak-normalize the selected range in the frozen buffer (scales quiet material up, hot material down); waveform peaks refresh immediately; preview and export use the updated PCM.
+- **Preview**: separate **Preview** and **Stop** buttons; optional **Loop preview** switch (**on** by default). **Preview loop from ¾** starts looping playback at **75%** through the selection so the user can hear the **tail → head** seam. Live **playhead** uses **wall-clock elapsed vs clip duration** with optional start offset ([PreviewPlayheadMath], independent of `AudioTrack.getPlaybackHeadPosition`); **compose coroutine** calls `tickPlayhead` ~60 Hz while playing.
 - **Export**: uncompressed **WAV**; filename e.g. `{userLabel}_BPM{nnn}_{YYYYMMDD}.wav` when loop + BPM confidence OK; else omit BPM segment. User picks **folder and filename** via the system **Save / Storage Access** dialog; the suggested name includes label + optional BPM + date; write goes to the returned **content URI**. Opening the save flow **stops editor preview** if it is playing.
 
 ### 3. BPM (loops)
@@ -80,6 +81,8 @@ Generic static settings-only screens may use Material defaults without the full 
 
 ## Changelog
 
+- **1.3.21** (2026-05-16): **Editor** — **Normalize selection** peak-normalizes the selected buffer range in place; waveform envelope updates immediately; preview/export reflect normalized audio.
+- **1.3.20** (2026-05-16): **Editor preview** — **Preview loop from ¾** button plays the selection in a loop starting at **75%** through the clip (tail then head) to verify loop wrap; playhead and `PreviewPlayer` honor `startFrameFraction`.
 - **1.3.19** (2026-05-02): **Editor crash fix** — preview `AudioTrack` init no longer crashes process when the platform rejects track creation (`UnsupportedOperationException: Cannot create AudioTrack`). `PreviewPlayer.play()` now returns success/failure, validates `STATE_INITIALIZED`, uses bounded stream buffer sizing (instead of sizing against full clip), and caller shows a toast on failure.
 - **1.3.18** (2026-05-02): **Editor fader precision** — selection sliders now support a local **slider control range**. **Use zoom for selection** sets both selection and slider range to the current viewport, so faders use the zoomed area (higher effective resolution). Added **Reset slider range** to return faders to full-buffer control.
 - **1.3.17** (2026-05-02): **Editor** — add **Use zoom for selection** action under waveform: maps current zoom viewport to selection start/end, then applies snapping; improves precision when trimming inside a zoomed-in region.

@@ -25,6 +25,33 @@ class PreviewPlayheadMathTest {
     }
 
     @Test
+    fun startOffset_atThreeQuarters() {
+        val f = PreviewPlayheadMath.fractionWithStartOffset(
+            0L,
+            1000,
+            48_000,
+            loop = true,
+            startFraction = 0.75f,
+        )
+        assertEquals(0.75f, f, 0.001f)
+    }
+
+    @Test
+    fun startOffset_loopWrapsToHead() {
+        val fc = 48_000
+        val sr = 48_000
+        val quarterMs = 250L
+        val f = PreviewPlayheadMath.fractionWithStartOffset(
+            quarterMs,
+            fc,
+            sr,
+            loop = true,
+            startFraction = 0.75f,
+        )
+        assertEquals(0f, f, 0.02f)
+    }
+
+    @Test
     fun loop_wraps() {
         val d = PreviewPlayheadMath.clipDurationMs(1000, 48_000) // ~20ms
         assertTrue(d > 0L)

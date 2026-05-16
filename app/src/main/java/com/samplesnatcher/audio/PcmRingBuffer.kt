@@ -140,6 +140,38 @@ class PcmRingBuffer(
     }
 
     /**
+     * Overwrites [startFrame]..[endFrameExclusive) in the live window with [interleaved] PCM.
+     * [interleaved] length must equal frame count × [channelCount].
+     */
+    fun replaceRangeInterleaved(
+        startFrame: Long,
+        endFrameExclusive: Long,
+        interleaved: ShortArray,
+    ): Boolean {
+        synchronized(bufferLock) {
+            val newest = framesCommitted
+            val stored = min(newest.toDouble(), capacityFrames.toDouble()).toLong()
+            val oldest = newest - stored
+            val start = maxOf(startFrame, oldest)
+            val end = minOf(endFrameExclusive, newest)
+            if (end <= start) return false
+            val frameCount = (end - start).toInt()
+            if (interleaved.size != frameCount * channelCount) return false
+            var o = 0
+            var f = start
+            while (f < end) {
+                val ring = (f % capacityFrames).toInt()
+                val base = ring * channelCount
+                for (c in 0 until channelCount) {
+                    buffer[base + c] = interleaved[o++]
+                }
+                f++
+            }
+            return true
+        }
+    }
+
+    /**
      * Peak envelope for visualization: per-bin max absolute sample (mixed channels).
      * [binCount] columns across the whole rolling buffer (valid window).
      */
